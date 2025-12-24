@@ -82,9 +82,20 @@ export default function Stock() {
         try {
             await productService.deleteProduct(id);
             loadData();
-        } catch (error) {
+            alert('✅ Produto excluído!');
+        } catch (error: unknown) {
             console.error(error);
-            alert('Erro ao excluir.');
+            const errorMessage = (error as { message?: string })?.message || '';
+            if (errorMessage.includes('foreign key') || errorMessage.includes('violates')) {
+                const deactivate = confirm('Este produto tem pedidos associados e não pode ser excluído.\n\nDeseja DESATIVAR o produto em vez de excluir?\n(Ele não aparecerá mais no PDV)');
+                if (deactivate) {
+                    await productService.updateProduct(id, { is_active: false });
+                    loadData();
+                    alert('✅ Produto desativado!');
+                }
+            } else {
+                alert(`Erro ao excluir: ${errorMessage}`);
+            }
         }
     }
 

@@ -2,11 +2,12 @@ import { useEffect, useState } from 'react';
 import { supabase } from '../../services/supabase';
 import { productService } from '../../services/products';
 import { adminService } from '../../services/admin';
-import { ArrowLeft, User, Plus, Minus, X, Beer, Calendar, MapPin, CreditCard, FileText, CheckCircle } from 'lucide-react';
+import { ArrowLeft, User, Plus, X, Beer, Calendar, MapPin, CreditCard, FileText, CheckCircle } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import type { Product } from '../../types';
 
 interface CartItem extends Product {
+    cartId: string; // Unique ID for each cart line
     quantity: number;
     isConsigned: boolean;
 }
@@ -43,7 +44,7 @@ export default function POS() {
     const [notes, setNotes] = useState('');
     const [discountType, setDiscountType] = useState<'percent' | 'fixed'>('percent');
     const [discountValue, setDiscountValue] = useState(0);
-    const [freightPerLiter, setFreightPerLiter] = useState(0);
+    const [deliveryCost, setDeliveryCost] = useState(0); // Custo fixo de entrega (interno)
     const [submitting, setSubmitting] = useState(false);
 
     // UI State
@@ -77,45 +78,33 @@ export default function POS() {
         (c.address && c.address.toLowerCase().includes(searchLower))
     );
 
+    // Each click adds a new line (not grouped by product)
     function addToCart(product: Product) {
-        setCart(current => {
-            const existing = current.find(item => item.id === product.id);
-            if (existing) {
-                return current.map(item =>
-                    item.id === product.id ? { ...item, quantity: item.quantity + 1 } : item
-                );
-            }
-            return [...current, { ...product, quantity: 1, isConsigned: false }];
-        });
+        const cartId = `${product.id}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        setCart(current => [...current, { ...product, cartId, quantity: 1, isConsigned: false }]);
     }
 
-    function toggleConsignment(productId: string) {
+    function toggleConsignment(cartId: string) {
         setCart(current => current.map(item =>
-            item.id === productId ? { ...item, isConsigned: !item.isConsigned } : item
+            item.cartId === cartId ? { ...item, isConsigned: !item.isConsigned } : item
         ));
     }
 
-    function removeFromCart(productId: string) {
-        setCart(current => current.filter(item => item.id !== productId));
+    function removeFromCart(cartId: string) {
+        setCart(current => current.filter(item => item.cartId !== cartId));
     }
 
-    function updateQuantity(productId: string, delta: number) {
-        setCart(current => current.map(item => {
-            if (item.id === productId) {
-                const newQty = Math.max(1, item.quantity + delta);
-                return { ...item, quantity: newQty };
-            }
-            return item;
-        }));
-    }
-
-    const subtotal = cart.reduce((acc, item) => acc + (item.price * item.quantity), 0);
+    // Consigned items are NOT charged upfront - they're pending
+    const regularSubtotal = cart.filter(item => !item.isConsigned).reduce((acc, item) => acc + (item.price * item.quantity), 0);
+    const consignedValue = cart.filter(item => item.isConsigned).reduce((acc, item) => acc + (item.price * item.quantity), 0);
+    const subtotal = regularSubtotal; // Only non-consigned items count
     const totalLiters = cart.reduce((acc, item) => acc + ((item.liters || 0) * item.quantity), 0);
-    const freightCost = totalLiters * freightPerLiter; // Informativo - custo estimado de entrega
+    const consignedLiters = cart.filter(item => item.isConsigned).reduce((acc, item) => acc + ((item.liters || 0) * item.quantity), 0);
+    // deliveryCost is a fixed value (internal cost), not per-liter
     const discountAmount = discountType === 'percent'
         ? (subtotal * discountValue / 100)
         : discountValue;
-    const total = Math.max(0, subtotal - discountAmount); // Frete NÃO é adicionado ao total
+    const total = Math.max(0, subtotal - discountAmount); // Só itens vendidos (não consignados)
 
     async function handleCreateNewCustomer() {
         if (!newCustomer.full_name) return;
@@ -175,7 +164,9 @@ export default function POS() {
                     delivery_address: deliveryAddress,
                     is_consignment: hasConsignedItems,
                     total_liters: totalLiters,
-                    freight_per_liter: freightPerLiter,
+                    delivery_cost: deliveryCost,
+                    event_date: eventDate || null,
+                    return_date: returnDate || null,
                     notes: orderNotes.trim()
                 })
                 .select()
@@ -229,7 +220,7 @@ export default function POS() {
             setNotes('');
             setDiscountType('percent');
             setDiscountValue(0);
-            setFreightPerLiter(0);
+            setDeliveryCost(0);
             setStep(1);
             loadData();
             alert(hasConsignedItems ? '📦 Consignado registrado!' : '✅ Locação registrada com sucesso!');
@@ -484,7 +475,7 @@ export default function POS() {
                             ) : (
                                 <div className="space-y-3 mb-4">
                                     {cart.map(item => (
-                                        <div key={item.id} className={`flex flex-col bg-background p-2 rounded-md ${item.isConsigned ? 'border-2' : ''}`} style={item.isConsigned ? { borderColor: '#f59e0b' } : {}}>
+                                        <div key={item.cartId} className={`flex flex-col bg-background p-2 rounded-md ${item.isConsigned ? 'border-2' : ''}`} style={item.isConsigned ? { borderColor: '#f59e0b' } : {}}>
                                             <div className="flex items-center justify-between">
                                                 <div>
                                                     <p className="text-sm font-medium text-white">
@@ -492,20 +483,17 @@ export default function POS() {
                                                         {item.isConsigned && <span className="ml-2 px-1.5 py-0.5 rounded text-xs font-bold" style={{ backgroundColor: 'rgba(245, 158, 11, 0.2)', color: '#f59e0b' }}>📦 CONSIGNADO</span>}
                                                     </p>
                                                     <p className="text-xs text-muted-foreground">
-                                                        {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(item.price)} un.
-                                                        {item.liters > 0 && <span className="ml-2" style={{ color: '#f59e0b' }}>🍺 {item.liters * item.quantity}L</span>}
+                                                        {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(item.price)}
+                                                        {item.liters > 0 && <span className="ml-2" style={{ color: '#f59e0b' }}>🍺 {item.liters}L</span>}
                                                     </p>
                                                 </div>
-                                                <div className="flex items-center gap-2">
-                                                    <button onClick={() => updateQuantity(item.id, -1)} className="p-1 hover:bg-muted rounded"><Minus size={12} /></button>
-                                                    <span className="text-sm w-4 text-center">{item.quantity}</span>
-                                                    <button onClick={() => updateQuantity(item.id, 1)} className="p-1 hover:bg-muted rounded"><Plus size={12} /></button>
-                                                    <button onClick={() => removeFromCart(item.id)} className="text-red-400 p-1"><X size={14} /></button>
-                                                </div>
+                                                <button onClick={() => removeFromCart(item.cartId)} className="text-red-400 p-1 hover:bg-red-900/20 rounded">
+                                                    <X size={16} />
+                                                </button>
                                             </div>
                                             {item.liters > 0 && (
                                                 <button
-                                                    onClick={() => toggleConsignment(item.id)}
+                                                    onClick={() => toggleConsignment(item.cartId)}
                                                     className={`mt-2 text-xs py-1 px-2 rounded font-medium transition-all ${item.isConsigned ? 'text-white' : 'text-muted-foreground'}`}
                                                     style={{ backgroundColor: item.isConsigned ? '#f59e0b' : '#374151' }}
                                                 >
@@ -519,9 +507,15 @@ export default function POS() {
 
                             <div className="border-t border-border pt-4 mb-4">
                                 <div className="flex justify-between text-lg font-bold">
-                                    <span className="text-white">Total</span>
+                                    <span className="text-white">Total a Cobrar</span>
                                     <span className="text-primary">{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(total)}</span>
                                 </div>
+                                {consignedValue > 0 && (
+                                    <div className="flex justify-between text-sm mt-2 p-2 rounded" style={{ backgroundColor: 'rgba(245, 158, 11, 0.1)' }}>
+                                        <span style={{ color: '#f59e0b' }}>📦 Consignado (pendente): {consignedLiters}L</span>
+                                        <span style={{ color: '#f59e0b' }}>{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(consignedValue)}</span>
+                                    </div>
+                                )}
                             </div>
 
                             <div className="flex gap-2">
@@ -670,11 +664,11 @@ export default function POS() {
                                 )}
                             </div>
 
-                            {/* Freight per Liter */}
+                            {/* Delivery Cost (Internal) */}
                             {totalLiters > 0 && (
                                 <div>
                                     <label className="text-sm font-medium mb-2 block">
-                                        Frete por Litro 🚚 <span className="text-muted-foreground font-normal">({totalLiters}L no carrinho)</span>
+                                        Custo de Entrega 🚚 <span className="text-muted-foreground font-normal">(interno - não afeta cliente)</span>
                                     </label>
                                     <div className="flex gap-2 items-center">
                                         <span className="text-muted-foreground">R$</span>
@@ -683,15 +677,14 @@ export default function POS() {
                                             step="0.01"
                                             min="0"
                                             className="input flex-1"
-                                            placeholder="Ex: 0.50"
-                                            value={freightPerLiter || ''}
-                                            onChange={e => setFreightPerLiter(parseFloat(e.target.value) || 0)}
+                                            placeholder="Ex: 20.00"
+                                            value={deliveryCost || ''}
+                                            onChange={e => setDeliveryCost(parseFloat(e.target.value) || 0)}
                                         />
-                                        <span className="text-muted-foreground">/ litro</span>
                                     </div>
-                                    {freightCost > 0 && (
+                                    {deliveryCost > 0 && (
                                         <p className="text-sm mt-1" style={{ color: '#3b82f6' }}>
-                                            💸 Custo estimado de entrega: {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(freightCost)} ({totalLiters}L × R${freightPerLiter.toFixed(2)})
+                                            💸 Custo de entrega: {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(deliveryCost)} (interno)
                                         </p>
                                     )}
                                 </div>
@@ -752,10 +745,10 @@ export default function POS() {
                                         <span className="text-muted-foreground">Subtotal</span>
                                         <span className="text-white">{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(subtotal)}</span>
                                     </div>
-                                    {freightCost > 0 && (
+                                    {deliveryCost > 0 && (
                                         <div className="flex justify-between p-2 rounded" style={{ backgroundColor: '#374151' }}>
-                                            <span className="text-muted-foreground">💸 Custo Entrega</span>
-                                            <span style={{ color: '#3b82f6' }}>{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(freightCost)}</span>
+                                            <span className="text-muted-foreground">💸 Custo Entrega (interno)</span>
+                                            <span style={{ color: '#3b82f6' }}>{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(deliveryCost)}</span>
                                         </div>
                                     )}
                                     {discountAmount > 0 && (

@@ -29,6 +29,8 @@ interface Order {
     delivery_address: string;
     is_consignment: boolean;
     notes: string;
+    event_date?: string;
+    return_date?: string;
     customer?: { full_name: string; phone?: string };
     order_items?: OrderItem[];
 }
@@ -51,7 +53,7 @@ export default function Dashboard() {
             const [statsData, ordersData] = await Promise.all([
                 adminService.getDashboardStats(),
                 supabase.from('orders').select(`
-                    id, created_at, total_amount, total_liters, status, delivery_address, is_consignment, notes,
+                    id, created_at, total_amount, total_liters, status, delivery_address, is_consignment, notes, event_date, return_date,
                     customer:customers(full_name, phone),
                     order_items(id, product_id, quantity, unit_price, is_consigned, product:products(name, liters))
                 `).order('created_at', { ascending: false }).limit(20)
@@ -91,15 +93,22 @@ export default function Dashboard() {
     async function confirmConsignmentSold() {
         if (!selectedOrder) return;
         try {
+            // Add consigned items value to total (they weren't charged upfront)
+            const consignedItemsValue = selectedOrder.order_items
+                ?.filter(item => item.is_consigned)
+                .reduce((sum, item) => sum + (item.unit_price * item.quantity), 0) || 0;
+            const newTotal = selectedOrder.total_amount + consignedItemsValue;
+
             await supabase.from('orders').update({
                 status: 'delivered',
                 is_consignment: false,
-                notes: `${selectedOrder.notes || ''} | ✅ Consignado VENDIDO em ${new Date().toLocaleDateString('pt-BR')}`
+                total_amount: newTotal,
+                notes: `${selectedOrder.notes || ''} | ✅ Consignado VENDIDO em ${new Date().toLocaleDateString('pt-BR')} (+${new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(consignedItemsValue)})`
             }).eq('id', selectedOrder.id);
 
             setShowModal(false);
             loadDashboard();
-            alert('✅ Consignado marcado como vendido!');
+            alert(`✅ Consignado vendido! +${new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(consignedItemsValue)} adicionado ao total.`);
         } catch (error) {
             console.error(error);
             alert('Erro ao confirmar venda');
@@ -109,22 +118,16 @@ export default function Dashboard() {
     async function confirmConsignmentReturned() {
         if (!selectedOrder) return;
         try {
-            // Calculate new total by subtracting consigned items value
-            const consignedItemsValue = selectedOrder.order_items
-                ?.filter(item => item.is_consigned)
-                .reduce((sum, item) => sum + (item.unit_price * item.quantity), 0) || 0;
-            const newTotal = selectedOrder.total_amount - consignedItemsValue;
-
+            // Returned = no value change (wasn't charged upfront anyway)
             await supabase.from('orders').update({
                 status: 'delivered',
                 is_consignment: false,
-                total_amount: newTotal,
-                notes: `${selectedOrder.notes || ''} | 📦 Consignado DEVOLVIDO lacrado em ${new Date().toLocaleDateString('pt-BR')} (-${new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(consignedItemsValue)})`
+                notes: `${selectedOrder.notes || ''} | 📦 Consignado DEVOLVIDO lacrado em ${new Date().toLocaleDateString('pt-BR')}`
             }).eq('id', selectedOrder.id);
 
             setShowModal(false);
             loadDashboard();
-            alert('📦 Consignado marcado como devolvido! Valor ajustado.');
+            alert('📦 Consignado devolvido! Sem alteração no valor.');
         } catch (error) {
             console.error(error);
             alert('Erro ao confirmar devolução');
@@ -149,6 +152,23 @@ export default function Dashboard() {
 
     const formatDate = (dateStr: string) =>
         new Date(dateStr).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+
+    const formatDateOnly = (dateStr: string) =>
+        new Date(dateStr).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+
+    // Check if return date is within 24 hours
+    const isReturnSoon = (returnDate?: string) => {
+        if (!returnDate) return false;
+        const now = new Date();
+        const returnTime = new Date(returnDate);
+        const diff = returnTime.getTime() - now.getTime();
+        return diff > 0 && diff < 24 * 60 * 60 * 1000; // Within 24 hours
+    };
+
+    const isOverdue = (returnDate?: string) => {
+        if (!returnDate) return false;
+        return new Date(returnDate) < new Date();
+    };
 
     const statusColors: Record<string, string> = {
         'pending': 'bg-yellow-500/20 text-yellow-400',
@@ -264,10 +284,20 @@ export default function Dashboard() {
                                     >
                                         <Eye size={16} style={{ color: '#3b82f6' }} />
                                     </button>
-                                    <div>
-                                        <p className="font-medium text-white">{order.customer?.full_name || 'Cliente não identificado'}</p>
+                                    <div className="flex-1">
+                                        <div className="flex items-center gap-2">
+                                            <p className="font-medium text-white">{order.customer?.full_name || 'Cliente não identificado'}</p>
+                                            {isOverdue(order.return_date) && order.status !== 'delivered' && order.status !== 'cancelled' && (
+                                                <span className="px-2 py-0.5 rounded text-xs font-bold bg-red-500/20 text-red-400 animate-pulse">⚠️ ATRASADO</span>
+                                            )}
+                                            {isReturnSoon(order.return_date) && order.status !== 'delivered' && order.status !== 'cancelled' && (
+                                                <span className="px-2 py-0.5 rounded text-xs font-bold bg-yellow-500/20 text-yellow-400">⏰ HOJE</span>
+                                            )}
+                                        </div>
                                         <p className="text-xs text-muted-foreground">
-                                            {formatDate(order.created_at)}
+                                            📅 Feito: {formatDateOnly(order.created_at)}
+                                            {order.event_date && <span className="ml-2">🎉 Evento: {formatDateOnly(order.event_date)}</span>}
+                                            {order.return_date && <span className="ml-2">🔙 Retorno: {formatDateOnly(order.return_date)}</span>}
                                             {order.total_liters > 0 && <span className="ml-2">🍺 {order.total_liters}L</span>}
                                         </p>
                                     </div>

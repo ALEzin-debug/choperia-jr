@@ -7,6 +7,7 @@ interface Order {
     created_at: string;
     total_amount: number;
     total_liters: number;
+    delivery_cost: number;
     status: string;
     customer?: { full_name: string };
 }
@@ -49,7 +50,7 @@ export default function Financials() {
     async function loadData() {
         try {
             const [ordersRes, expensesRes, employeesRes] = await Promise.all([
-                supabase.from('orders').select(`id, created_at, total_amount, total_liters, status, customer:customers(full_name)`).order('created_at', { ascending: false }),
+                supabase.from('orders').select(`id, created_at, total_amount, total_liters, delivery_cost, status, customer:customers(full_name)`).order('created_at', { ascending: false }),
                 supabase.from('expenses').select('*').order('date', { ascending: false }),
                 supabase.from('employees').select('*').eq('is_active', true)
             ]);
@@ -79,6 +80,7 @@ export default function Financials() {
     const filteredOrders = orders.filter(o => filterByPeriod(o.created_at) && o.status !== 'cancelled');
     const totalRevenue = filteredOrders.reduce((acc, o) => acc + (o.total_amount || 0), 0);
     const totalLitersSold = filteredOrders.reduce((acc, o) => acc + (o.total_liters || 0), 0);
+    const totalDeliveryCost = filteredOrders.reduce((acc, o) => acc + (o.delivery_cost || 0), 0);
     const averageTicket = filteredOrders.length > 0 ? totalRevenue / filteredOrders.length : 0;
 
     // Expense calculations
@@ -92,8 +94,8 @@ export default function Financials() {
     // Salary calculations
     const totalMonthlySalary = employees.reduce((sum, e) => sum + e.salary, 0);
 
-    // Net Profit
-    const netProfit = totalRevenue - totalExpenses - (period === 'month' || period === 'all' ? totalMonthlySalary : 0);
+    // Net Profit (inclui custos de entrega)
+    const netProfit = totalRevenue - totalExpenses - totalDeliveryCost - (period === 'month' || period === 'all' ? totalMonthlySalary : 0);
 
     const formatCurrency = (value: number) =>
         new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
@@ -150,6 +152,19 @@ export default function Financials() {
                         </div>
                         <div className="h-12 w-12 rounded-full flex items-center justify-center" style={{ backgroundColor: 'rgba(239, 68, 68, 0.2)' }}>
                             <TrendingDown size={24} style={{ color: '#ef4444' }} />
+                        </div>
+                    </div>
+                </div>
+
+                <div className="card" style={{ backgroundColor: '#1f2937' }}>
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <p className="text-sm text-muted-foreground">Custo de Entrega 🚚</p>
+                            <p className="text-2xl font-bold" style={{ color: '#3b82f6' }}>{formatCurrency(totalDeliveryCost)}</p>
+                            <p className="text-xs text-muted-foreground mt-1">Total no período</p>
+                        </div>
+                        <div className="h-12 w-12 rounded-full flex items-center justify-center" style={{ backgroundColor: 'rgba(59, 130, 246, 0.2)' }}>
+                            <Truck size={24} style={{ color: '#3b82f6' }} />
                         </div>
                     </div>
                 </div>
