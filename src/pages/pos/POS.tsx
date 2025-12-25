@@ -53,6 +53,7 @@ export default function POS() {
     const [newCustomerMode, setNewCustomerMode] = useState(false);
     const [newCustomer, setNewCustomer] = useState({ full_name: '', phone: '', address: '' });
     const [step, setStep] = useState(1); // 1=Cliente, 2=Equipamento, 3=Produtos, 4=Detalhes
+    const [customerOrders, setCustomerOrders] = useState<{ id: string; created_at: string; total_amount: number; total_liters: number; status: string; delivery_address?: string }[]>([]);
 
     useEffect(() => {
         loadData();
@@ -69,6 +70,24 @@ export default function POS() {
         setAssets(assetsData || []);
         setLoading(false);
     }
+
+    // Load customer's recent orders when customer is selected
+    useEffect(() => {
+        async function loadCustomerOrders() {
+            if (selectedCustomer) {
+                const { data } = await supabase
+                    .from('orders')
+                    .select('id, created_at, total_amount, total_liters, status, delivery_address')
+                    .eq('customer_id', selectedCustomer.id)
+                    .order('created_at', { ascending: false })
+                    .limit(10);
+                setCustomerOrders(data || []);
+            } else {
+                setCustomerOrders([]);
+            }
+        }
+        loadCustomerOrders();
+    }, [selectedCustomer]);
 
     const availableAssets = assets.filter(a => a.status === 'available');
     const searchLower = customerSearch.toLowerCase();
@@ -613,17 +632,30 @@ export default function POS() {
                                 </div>
                             </div>
 
-                            {/* Notes */}
-                            <div>
-                                <label className="text-sm font-medium mb-1 block">Observações</label>
-                                <textarea
-                                    className="input resize-none"
-                                    rows={3}
-                                    placeholder="Ex: Entregar às 14h, cobrar frete separado..."
-                                    value={notes}
-                                    onChange={e => setNotes(e.target.value)}
-                                />
-                            </div>
+                            {/* Customer Order History */}
+                            {customerOrders.length > 0 && (
+                                <div className="p-4 rounded-md" style={{ backgroundColor: '#374151' }}>
+                                    <p className="font-medium text-white mb-2">📋 Últimos Pedidos do Cliente</p>
+                                    <div className="space-y-2 max-h-32 overflow-y-auto">
+                                        {customerOrders.map(order => (
+                                            <div key={order.id} className="text-sm p-2 rounded" style={{ backgroundColor: '#1f2937' }}>
+                                                <div className="flex justify-between">
+                                                    <span className="text-muted-foreground">
+                                                        {new Date(order.created_at).toLocaleDateString('pt-BR')}
+                                                        {order.total_liters > 0 && <span className="ml-1">• {order.total_liters}L</span>}
+                                                    </span>
+                                                    <span className="font-medium" style={{ color: '#f59e0b' }}>
+                                                        {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(order.total_amount)}
+                                                    </span>
+                                                </div>
+                                                {order.delivery_address && (
+                                                    <p className="text-xs mt-1" style={{ color: '#9ca3af' }}>📍 {order.delivery_address}</p>
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
 
                             {/* Discount */}
                             <div>
