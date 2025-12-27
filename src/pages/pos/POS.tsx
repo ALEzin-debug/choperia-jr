@@ -45,6 +45,7 @@ export default function POS() {
     const [discountType, setDiscountType] = useState<'percent' | 'fixed'>('percent');
     const [discountValue, setDiscountValue] = useState(0);
     const [deliveryCost, setDeliveryCost] = useState(0); // Custo fixo de entrega (interno)
+    const [deliveryFee, setDeliveryFee] = useState(0); // Taxa de entrega cobrada do cliente
     const [submitting, setSubmitting] = useState(false);
 
     // UI State
@@ -123,7 +124,7 @@ export default function POS() {
     const discountAmount = discountType === 'percent'
         ? (subtotal * discountValue / 100)
         : discountValue;
-    const total = Math.max(0, subtotal - discountAmount); // Só itens vendidos (não consignados)
+    const total = Math.max(0, subtotal - discountAmount + deliveryFee); // Subtotal - Desconto + Taxa de Entrega
 
     async function handleCreateNewCustomer() {
         if (!newCustomer.full_name) return;
@@ -184,6 +185,7 @@ export default function POS() {
                     is_consignment: hasConsignedItems,
                     total_liters: totalLiters,
                     delivery_cost: deliveryCost,
+                    delivery_fee: deliveryFee,
                     event_date: eventDate || null,
                     return_date: returnDate || null,
                     notes: orderNotes.trim()
@@ -240,6 +242,7 @@ export default function POS() {
             setDiscountType('percent');
             setDiscountValue(0);
             setDeliveryCost(0);
+            setDeliveryFee(0);
             setStep(1);
             loadData();
             alert(hasConsignedItems ? '📦 Consignado registrado!' : '✅ Locação registrada com sucesso!');
@@ -722,6 +725,30 @@ export default function POS() {
                                 </div>
                             )}
 
+                            {/* Delivery Fee (Charged to Customer) */}
+                            <div>
+                                <label className="text-sm font-medium mb-2 block">
+                                    Taxa de Entrega 🚛 <span className="text-muted-foreground font-normal">(cobrada do cliente)</span>
+                                </label>
+                                <div className="flex gap-2 items-center">
+                                    <span className="text-muted-foreground">R$</span>
+                                    <input
+                                        type="number"
+                                        step="0.01"
+                                        min="0"
+                                        className="input flex-1"
+                                        placeholder="Ex: 30.00"
+                                        value={deliveryFee || ''}
+                                        onChange={e => setDeliveryFee(parseFloat(e.target.value) || 0)}
+                                    />
+                                </div>
+                                {deliveryFee > 0 && (
+                                    <p className="text-sm mt-1" style={{ color: '#10b981' }}>
+                                        ✅ Taxa: {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(deliveryFee)} (será adicionada ao total)
+                                    </p>
+                                )}
+                            </div>
+
                             {/* Consignment Summary */}
                             {cart.some(item => item.isConsigned) && (
                                 <div className="p-4 rounded-md" style={{ backgroundColor: '#374151', border: '2px solid #f59e0b' }}>
@@ -787,6 +814,12 @@ export default function POS() {
                                         <div className="flex justify-between">
                                             <span className="text-muted-foreground">Desconto</span>
                                             <span style={{ color: '#10b981' }}>-{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(discountAmount)}</span>
+                                        </div>
+                                    )}
+                                    {deliveryFee > 0 && (
+                                        <div className="flex justify-between">
+                                            <span className="text-muted-foreground">Taxa de Entrega</span>
+                                            <span style={{ color: '#f59e0b' }}>+{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(deliveryFee)}</span>
                                         </div>
                                     )}
                                     {cart.some(item => item.isConsigned) && (
