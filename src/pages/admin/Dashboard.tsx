@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../../services/supabase';
 import { adminService } from '../../services/admin';
-import { DollarSign, Package, Truck, Beer, Eye, X, Check, Clock, MapPin, Phone, Calendar, Edit2, Save } from 'lucide-react';
+import { DollarSign, Package, Truck, Beer, Eye, X, Check, Clock, MapPin, Phone, Calendar, Edit2, Save, Trash2 } from 'lucide-react';
 
 interface Stats {
     products: number;
@@ -147,6 +147,23 @@ export default function Dashboard() {
         }
     }
 
+    async function deleteOrder(orderId: string, e?: React.MouseEvent) {
+        e?.stopPropagation();
+        if (!confirm('Tem certeza que deseja APAGAR permanentemente este pedido? Esta ação não pode ser desfeita!')) return;
+        try {
+            // Primeiro apaga os itens do pedido
+            await supabase.from('order_items').delete().eq('order_id', orderId);
+            // Depois apaga o pedido
+            await supabase.from('orders').delete().eq('id', orderId);
+            setShowModal(false);
+            loadDashboard();
+            alert('✅ Pedido apagado com sucesso!');
+        } catch (error) {
+            console.error(error);
+            alert('Erro ao apagar pedido');
+        }
+    }
+
     const formatCurrency = (value: number) =>
         new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
 
@@ -268,50 +285,87 @@ export default function Dashboard() {
                 </div>
             )}
 
-            <div className="card" style={{ backgroundColor: '#1f2937' }}>
-                <h2 className="text-lg font-bold text-white mb-4">Pedidos Recentes</h2>
-                {recentOrders.length === 0 ? (
-                    <p className="text-muted-foreground">Nenhum pedido recente.</p>
-                ) : (
-                    <div className="space-y-3">
-                        {recentOrders.map(order => (
-                            <div key={order.id} className="flex items-center justify-between p-3 rounded-md" style={{ backgroundColor: '#374151' }}>
-                                <div className="flex items-center gap-3">
-                                    <button
-                                        onClick={() => openOrderModal(order)}
-                                        className="h-8 w-8 rounded-full flex items-center justify-center hover:scale-110 transition-transform"
-                                        style={{ backgroundColor: 'rgba(59, 130, 246, 0.2)' }}
-                                    >
-                                        <Eye size={16} style={{ color: '#3b82f6' }} />
-                                    </button>
-                                    <div className="flex-1">
-                                        <div className="flex items-center gap-2">
-                                            <p className="font-medium text-white">{order.customer?.full_name || 'Cliente não identificado'}</p>
-                                            {isOverdue(order.return_date) && order.status !== 'delivered' && order.status !== 'cancelled' && (
-                                                <span className="px-2 py-0.5 rounded text-xs font-bold bg-red-500/20 text-red-400 animate-pulse">⚠️ ATRASADO</span>
-                                            )}
-                                            {isReturnSoon(order.return_date) && order.status !== 'delivered' && order.status !== 'cancelled' && (
-                                                <span className="px-2 py-0.5 rounded text-xs font-bold bg-yellow-500/20 text-yellow-400">⏰ HOJE</span>
-                                            )}
-                                        </div>
-                                        <p className="text-xs text-muted-foreground">
-                                            📅 Feito: {formatDateOnly(order.created_at)}
-                                            {order.event_date && <span className="ml-2">🎉 Evento: {formatDateOnly(order.event_date)}</span>}
-                                            {order.return_date && <span className="ml-2">🔙 Retorno: {formatDateOnly(order.return_date)}</span>}
-                                            {order.total_liters > 0 && <span className="ml-2">🍺 {order.total_liters}L</span>}
-                                        </p>
-                                    </div>
-                                </div>
-                                <div className="text-right">
-                                    <p className="font-bold text-primary">{formatCurrency(order.total_amount)}</p>
-                                    <span className={`text-xs px-2 py-0.5 rounded-full ${statusColors[order.status] || ''}`}>
-                                        {statusLabels[order.status] || order.status}
-                                    </span>
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-                )}
+            {/* Tabela de Pedidos Recentes - Estilo igual à página de Locações */}
+            <div className="card overflow-hidden">
+                <h2 className="text-lg font-bold text-white mb-4 px-4 pt-4">Pedidos Recentes</h2>
+                <table className="w-full text-left text-sm">
+                    <thead className="bg-muted/50">
+                        <tr className="border-b border-border">
+                            <th className="py-3 px-4">Cliente</th>
+                            <th className="py-3 px-4">Data Pedido</th>
+                            <th className="py-3 px-4">Evento/Retorno</th>
+                            <th className="py-3 px-4">Litros</th>
+                            <th className="py-3 px-4">Valor</th>
+                            <th className="py-3 px-4">Status</th>
+                            <th className="py-3 px-4">Ações</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {loading ? (
+                            <tr><td colSpan={7} className="p-4 text-center">Carregando...</td></tr>
+                        ) : recentOrders.length === 0 ? (
+                            <tr><td colSpan={7} className="p-4 text-center">Nenhum pedido recente.</td></tr>
+                        ) : (
+                            recentOrders.map((order) => {
+                                const isLate = isOverdue(order.return_date) && order.status !== 'delivered' && order.status !== 'cancelled';
+                                const isSoon = isReturnSoon(order.return_date) && order.status !== 'delivered' && order.status !== 'cancelled';
+                                return (
+                                    <tr key={order.id} className="border-b border-border/50">
+                                        <td className="py-3 px-4 font-medium text-white">
+                                            {order.customer?.full_name || 'N/A'}
+                                        </td>
+                                        <td className="py-3 px-4 text-muted-foreground">
+                                            {formatDateOnly(order.created_at)}
+                                        </td>
+                                        <td className={`py-3 px-4 ${isLate ? 'text-red-400 font-bold' : isSoon ? 'text-yellow-400 font-bold' : ''}`}>
+                                            {order.event_date && <span>{formatDateOnly(order.event_date)}</span>}
+                                            {order.event_date && order.return_date && ' / '}
+                                            {order.return_date && <span>{formatDateOnly(order.return_date)}</span>}
+                                            {isLate && ' (ATRASADO)'}
+                                            {isSoon && ' (HOJE)'}
+                                        </td>
+                                        <td className="py-3 px-4 text-muted-foreground">
+                                            {order.total_liters}L
+                                        </td>
+                                        <td className="py-3 px-4 font-bold text-primary">
+                                            {formatCurrency(order.total_amount)}
+                                        </td>
+                                        <td className="py-3 px-4">
+                                            <span className={`px-2 py-1 rounded-full text-xs font-bold ${statusColors[order.status] || ''}`}>
+                                                {statusLabels[order.status] || order.status}
+                                            </span>
+                                        </td>
+                                        <td className="py-3 px-4">
+                                            <div className="flex items-center gap-1">
+                                                <button
+                                                    onClick={() => openOrderModal(order)}
+                                                    className="btn btn-secondary text-sm flex items-center gap-1"
+                                                >
+                                                    <Eye size={14} />
+                                                    Ver
+                                                </button>
+                                                <button
+                                                    onClick={() => { setSelectedOrder(order); setEditData({ status: order.status, notes: order.notes || '', delivery_address: order.delivery_address || '' }); setEditing(true); setShowModal(true); }}
+                                                    className="btn btn-secondary text-sm flex items-center gap-1"
+                                                >
+                                                    <Edit2 size={14} />
+                                                    Editar
+                                                </button>
+                                                <button
+                                                    onClick={(e) => deleteOrder(order.id, e)}
+                                                    className="btn btn-secondary text-sm flex items-center gap-1 text-red-400"
+                                                >
+                                                    <Trash2 size={14} />
+                                                    Apagar
+                                                </button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                );
+                            })
+                        )}
+                    </tbody>
+                </table>
             </div>
 
             {/* Order Details Modal */}
@@ -490,6 +544,13 @@ export default function Dashboard() {
                                         <X size={18} /> Cancelar Pedido
                                     </button>
                                 )}
+                                <button
+                                    onClick={() => deleteOrder(selectedOrder.id)}
+                                    className="btn flex items-center gap-2 text-white"
+                                    style={{ backgroundColor: '#dc2626' }}
+                                >
+                                    <Trash2 size={18} /> Apagar Pedido
+                                </button>
                                 <button onClick={() => setShowModal(false)} className="btn btn-secondary flex items-center gap-2">
                                     <Clock size={18} /> Fechar
                                 </button>
